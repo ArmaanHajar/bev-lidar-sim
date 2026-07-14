@@ -250,3 +250,20 @@ guarantee or real-world sensor transfer.
 accepts an explicit NumPy generator, but creates an unseeded generator when
 none is supplied. Research scripts should therefore construct it with, for
 example, `rng=np.random.default_rng(sensor_seed)` and record both seeds.
+
+## License and citation
+
+Created by **Armaan Hajarizadeh**. Released under the
+[MIT License](LICENSE) — free to use, modify, and redistribute, provided the
+copyright notice is preserved.
+
+If you use this simulator in research, please cite it:
+
+```bibtex
+@software{hajarizadeh_bev_lidar_sim,
+  author = {Hajarizadeh, Armaan},
+  title  = {bev-lidar-sim: a 2D BEV LiDAR sensor and traffic simulator},
+  url    = {https://github.com/ArmaanHajar/bev-lidar-sim},
+  year   = {2026},
+}
+```
