@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.scripts]
-bev-drive = "bev_lidar_sim.drive:main"
-bev-demo = "bev_lidar_sim.demo:main"
+bev-drive = "bev_lidar_sim.cli.drive:main"
+bev-demo = "bev_lidar_sim.cli.demo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

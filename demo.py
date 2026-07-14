@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from bev_lidar_sim.demo import main
+from bev_lidar_sim.cli.demo import main
 
 
 if __name__ == "__main__":
