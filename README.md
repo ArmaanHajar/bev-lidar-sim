@@ -42,9 +42,9 @@ Important current limitations are:
   rolling scan, or sensor latency;
 - **simple intensity/noise** — no incidence-angle, material calibration,
   multi-return, or weather physics;
-- **one grid topology and limited actors** — seeds vary buildings, parked
-  vehicles, traffic, and routes, but the road grid is not configurable yet and
-  there are no pedestrians, cyclists, or lane changes;
+- **limited actors** — scenarios vary road topology (grids, T-junctions,
+  curved roads, closures) and seeds vary buildings, parked vehicles, traffic,
+  and routes, but there are no pedestrians, cyclists, or lane changes;
 - **script-oriented execution** — no standardized reset/action/observation
   API, episode recorder, benchmark metrics, or collision engine yet; and
 - **longitudinal-only manual ego control** — steering remains path-following.
@@ -58,10 +58,20 @@ accordingly.
 
 ```bash
 python drive.py                       # generated city + ego LiDAR
-python drive.py --no-lidar            # city street view only
+python drive.py --scenario riverside  # winding A->B mission along the river
+python drive.py --scenario suburbs    # irregular T-junction district mission
+python drive.py --scenario roadworks  # detour around a coned-off block
+python drive.py --driver daring       # safe, normal (default), or daring
+python drive.py --no-lidar            # street view only
 python drive.py --scenario arterial   # original straight-road environment
-python drive.py --save out.gif --seconds 20   # headless city GIF
+python drive.py --save out.gif --seconds 20   # headless GIF of any scenario
 ```
+
+In the mission scenarios the ego drives a fixed origin → destination trip
+(HUD shows the remaining distance) and restarts it on arrival; `city` keeps
+choosing random destinations forever.
+
+![riverside demo](assets/riverside_demo.gif)
 
 After installing the package, the equivalent console command is `bev-drive`.
 Both live panels are north-up: the map and LiDAR returns stay in a fixed world
@@ -70,7 +80,8 @@ orientation while the cyan ego marker turns with the vehicle.
 The live window runs on **pygame at 60 fps**; GIF export renders headless
 (no window) through the exact same code path and takes seconds.
 
-Keys in the live window: `space` pause · `b` toggle ground-truth boxes ·
+Keys in the live window: `space` pause · `1` safe · `2` normal · `3` daring ·
+`b` toggle ground-truth boxes ·
 `r` toggle laser rays · `m` take the wheel (throttle `↑` / brake `↓`;
 the ego steers itself along its lane) · `esc` quit.
 
@@ -113,11 +124,11 @@ python -m unittest discover -s tests -v
 
 | Path | Role |
 |------|------|
-| `src/bev_lidar_sim/sensors/` | `scene.py`: `Box` + `Scene`, everything becomes line segments with per-surface reflectivity. `lidar.py`: `Lidar2D` — vectorized ray/segment intersection, nearest hit, range noise, dropout, intensity channel |
-| `src/bev_lidar_sim/maps/` | `roadgraph.py`: neutral map schema (nodes / lanes / connectors) with JSON round-trip; the seam for future SUMO-netconvert / Waymo-map importers |
-| `src/bev_lidar_sim/sim/` | `traffic.py`: `Path`, `Vehicle`, IDM, signals, all-way stops, and the scenario-independent simulator core. `city/`: default 4×4 city — `graph.py` emits the grid `RoadGraph`, `world.py` builds seeded blocks/parked cars, `simulator.py` runs traffic on any `RoadGraph`. `arterial.py`: the original straight-arterial scenario |
-| `src/bev_lidar_sim/render/` | `live.py`: pygame ego-following city/arterial view + north-up ego LiDAR panel. `stills.py`: matplotlib BEV rendering for publication stills |
-| `src/bev_lidar_sim/cli/` | `drive.py` (driving sim) and `demo.py` (static LiDAR demo) CLI implementations |
+| `bev_lidar_sim/sensors/` | `scene.py`: `Box` + `Scene`, everything becomes line segments with per-surface reflectivity. `lidar.py`: `Lidar2D` — vectorized ray/segment intersection, nearest hit, range noise, dropout, intensity channel |
+| `bev_lidar_sim/maps/` | `roadgraph.py`: neutral map schema (nodes / lanes / connectors) with JSON round-trip; the seam for future SUMO-netconvert / Waymo-map importers |
+| `bev_lidar_sim/sim/` | `traffic.py`: `Path`, `Vehicle`, IDM, signals, all-way stops, and the scenario-independent simulator core. `city/`: `graph.py` (map construction utilities + grid builder), `world.py` (graph-driven world decoration), `simulator.py` (traffic on any `RoadGraph`, A→B missions). `scenarios.py`: the city/suburbs/riverside/roadworks registry. `arterial.py`: the original straight-arterial scenario |
+| `bev_lidar_sim/render/` | `live.py`: pygame ego-following city/arterial view + north-up ego LiDAR panel. `stills.py`: matplotlib BEV rendering for publication stills |
+| `bev_lidar_sim/cli/` | `drive.py` (driving sim) and `demo.py` (static LiDAR demo) CLI implementations |
 | `tests/` | Lane-graph, connector, determinism, schema round-trip, and LiDAR checks |
 | `drive.py`, `demo.py` | Thin root wrappers for the old commands |
 | `assets/` | README/demo images and GIFs |
@@ -138,6 +149,12 @@ transitions, so a car follows smoothly through a turn. Traffic controls are
 handled the way real microsimulators do it: a red light or an un-granted stop
 line becomes a *virtual stopped car* at the line, so the same IDM code that
 follows the lead vehicle also produces smooth stops at signals.
+
+The ego has three automated driving profiles. **Safe** stays below the road
+speed, accelerates gently, and leaves more room. **Normal** is the default and
+keeps a moderately brisk pace. **Daring** accelerates harder, accepts a smaller
+following gap, and carries more speed through turns. All three still obey
+traffic lights and stop signs.
 
 On top of that:
 

@@ -23,7 +23,7 @@ ego control), so keep the sensor/sim layers clean and renderer-agnostic.
 ## Layout and dependency direction
 
 ```
-src/bev_lidar_sim/          (five layers; __init__ re-exports the headless API)
+bev_lidar_sim/              (five layers; __init__ re-exports the headless API)
   sensors/      Sensor layer. Pure numpy.
     scene.py      Box + Scene primitives; everything reduces to line
                   segments with per-segment reflectivity. No sim knowledge.
@@ -32,11 +32,13 @@ src/bev_lidar_sim/          (five layers; __init__ re-exports the headless API)
                   segment index. Takes raw arrays; independent of scene.py.
   maps/         Map layer. Pure numpy + stdlib; no engine imports.
     roadgraph.py  Neutral map schema: RoadNode / LaneDef / ConnectorDef /
-                  RoadGraph, with validate() and JSON round-trip. Map
-                  *sources* (sim/city/graph.py, future netconvert/WOMD
-                  importers — put importers in this package) emit a
-                  RoadGraph; the simulator consumes one. This is the seam
-                  for real-map import.
+                  RoadDef (physical road centerline + width, optional but
+                  needed for decoration/offroad) / RoadGraph, with
+                  validate() and JSON round-trip. Map *sources*
+                  (sim/city/graph.py, sim/scenarios.py, future
+                  netconvert/WOMD importers — put importers in this
+                  package) emit a RoadGraph; the simulator consumes one.
+                  This is the seam for real-map import.
   sim/          Simulation layer.
     traffic.py    Shared machinery: Path, Vehicle, IDM, Signal, AllWayStop,
                   REFL/colors, and the scenario-independent `Simulator` core
@@ -44,17 +46,31 @@ src/bev_lidar_sim/          (five layers; __init__ re-exports the headless API)
                   Subclasses supply network, world, spawning, _transitions.
     arterial.py   Legacy arterial scenario: WorldGeometry + ArterialSimulator
                   (`--scenario arterial`). Keeps the turn_at_u mechanism.
-    city/         Default generated city.
-      graph.py      Grid layout as pure map data: build_city_roadgraph()
-                    (no RNG — identical across processes). City geometry
-                    and routing constants live at the top of this file.
-      world.py      CityWorld static render/LiDAR geometry (seeded blocks,
-                    trees, parked cars, paint). Still assumes the grid
-                    layout; generalizing it to imported RoadGraphs is the
-                    planned next step for map import.
+    scenarios.py  Named driving scenarios (city / suburbs / riverside /
+                  roadworks): each is a map builder + a fixed A->B ego
+                  mission (ego_od) + world dressing (closed roads, water)
+                  + traffic caps. `make_sim(name, seed, driving_mode)` is
+                  the constructor the CLI uses; register new scenarios in
+                  SCENARIOS.
+    city/         RoadGraph-driven simulator + procedural map builders.
+      graph.py      Generic construction utilities (offset_polyline,
+                    trim_polyline, add_two_way_road for straight OR curved
+                    centerlines, tangent-based add_connectors) plus
+                    build_grid_roadgraph(xs, ys, skip, with_signals) and
+                    the default build_city_roadgraph(). Pure functions of
+                    their arguments (no RNG — identical across processes).
+                    City geometry and routing constants live at the top.
+      world.py      CityWorld derives ALL static render/LiDAR geometry from
+                    any RoadGraph: pavement/sidewalk strips buffer RoadDef
+                    centerlines, curbs offset them, stop lines/crosswalks/
+                    poles come from lane end tangents, buildings are
+                    rejection-sampled against road clearance, trees/parked
+                    cars sample along road tangents. No grid assumptions —
+                    curved roads and T-junctions decorate correctly.
       simulator.py  CitySimulator: builds signals/stops/Paths from any
                     RoadGraph (`graph=` kwarg), BFS boundary routing,
-                    spawning.
+                    spawning, optional fixed ego_od missions (restart at
+                    the origin on arrival), per-scenario vehicle caps.
   render/       Rendering layer (keep live and stills separate).
     live.py       Pygame renderer: ego-following city/arterial view + LiDAR
                   panel. Depends on sim.arterial (constants), sensors.lidar.
@@ -65,7 +81,7 @@ src/bev_lidar_sim/          (five layers; __init__ re-exports the headless API)
     drive.py      Driving CLI: live 60 fps window or headless GIF export.
     demo.py       Static-scene sensor CLI: bev_frame.png / bev_scan.gif.
 drive.py, demo.py (repo root)
-              Thin sys.path wrappers so `python drive.py` works uninstalled.
+              Thin wrappers so `python drive.py` works uninstalled.
               Keep them 10-ish lines; all logic lives in the package.
 assets/       Committed media referenced by README (drive_demo.gif, etc.).
 outputs/      Gitignored scratch output dir (demo.py default target).
@@ -85,6 +101,7 @@ sim.arterial       -> sim.traffic, sensors.scene
 sim.city.graph     -> maps.roadgraph
 sim.city.world     -> sim.traffic, sensors.scene, sim.city.graph
 sim.city.simulator -> maps.roadgraph, sim.traffic, sim.city.graph/world
+sim.scenarios      -> maps.roadgraph, sim.city
 render.live        -> sim.arterial, sensors.lidar
 render.stills      -> sensors
 cli.drive          -> sim, render
@@ -126,10 +143,15 @@ scenarios as plain files.
 ```bash
 .venv/bin/python drive.py                      # live 60 fps window (needs a display)
 .venv/bin/python drive.py --save out.gif --seconds 24 --seed 1
+.venv/bin/python drive.py --scenario riverside # suburbs | riverside | roadworks
 .venv/bin/python drive.py --scenario arterial  # legacy straight-road scenario
 .venv/bin/python demo.py [--rays|--animate]    # stills -> outputs/
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+Scenario missions (`suburbs`, `riverside`, `roadworks`) give the ego a fixed
+boundary-to-boundary A->B trip that restarts at the origin on arrival; the
+HUD shows remaining meters. `city` keeps random destinations.
 
 - `--save` sets `SDL_VIDEODRIVER=dummy` itself; GIF export is fully headless
   and CI/agent-safe. The live window obviously isn't — never try to "test"
@@ -137,8 +159,8 @@ scenarios as plain files.
   (see verification below).
 - GIF timeline is fixed: 20 fps, `sim.step(0.05)` per frame — one GIF second
   equals one sim second. The live loop steps `1/60` per rendered frame.
-- Live keys: `space` pause, `b` GT boxes, `r` rays, `m` manual ego
-  (throttle ↑ / brake ↓), `esc` quit.
+- Live keys: `space` pause, `1` safe / `2` normal / `3` daring ego profile,
+  `b` GT boxes, `r` rays, `m` manual ego (throttle ↑ / brake ↓), `esc` quit.
 - README media lives in `assets/` (committed). Regenerate the hero GIF with:
   `.venv/bin/python drive.py --save assets/drive_demo.gif --seconds 24 --seed 1`
   — takes ~20 s, expect ~10–12 MB at the default `--width 1080`. If a change
@@ -153,7 +175,7 @@ Before claiming a sim/render change works, do all four:
    Add focused tests when changing route connectivity, connector geometry,
    determinism, or local LiDAR scene construction.
 2. **Traffic audit** — run the sim headless for 180 sim-seconds across a few
-   seeds and assert the invariants:
+   seeds *and every scenario in `SCENARIOS`* and assert the invariants:
    - zero oriented-box vehicle overlaps (center distance alone misses
      perpendicular conflicts inside city intersections),
    - no vehicle stalled (< 0.2 m/s) for more than ~40 s continuously
@@ -209,6 +231,12 @@ These encode real bugs that were already found and fixed — do not reintroduce:
 - **Commanded acceleration is clamped to −6 m/s².** Raw IDM can emit −600
   when a light change traps a car past its comfortable stopping point; the
   clamp also keeps brake-light logic (`acc < -0.7`) sane.
+- **Driver profiles affect only the automated ego.** Background traffic keeps
+  the shared `IDM` parameters and posted path speeds. The ego's `safe`,
+  `normal`, and `daring` modes select `DRIVER_PROFILES` values for speed
+  tolerance, acceleration, braking comfort, following gap, and turn speed;
+  all modes still use the same traffic-control logic. Live keys `1`–`3` also
+  leave manual mode so the selected automated profile takes effect.
 - **`turn_at_u` is a legacy-arterial mechanism.** City routes transition at
   lane ends through explicit connector paths. Both forms slow for an upcoming
   turn in `Simulator.step`; keep that dual behavior when changing braking.
@@ -223,10 +251,27 @@ These encode real bugs that were already found and fixed — do not reintroduce:
   The city ego receives a new boundary-to-boundary route after completing a
   trip; non-ego city traffic despawns at its destination boundary.
 - **Ego routes must contain a turn.** City routing is shortest-hop BFS, which
-  favors straight lines; ego route requests pass `min_turns=1, skip=2` so
-  every ego trip visibly turns (seed 1 once drove straight for 3+ minutes).
-  `skip` matters: the ego spawns at `paths[2]`, so turns in the skipped stub
-  don't count. Covered by `test_ego_route_always_contains_a_turn`.
+  favors straight lines; random ego route requests pass `min_turns=1, skip=2`
+  so every ego trip visibly turns (seed 1 once drove straight for 3+
+  minutes). `skip` matters: the ego spawns at `paths[2]`, so turns in the
+  skipped stub don't count. Covered by
+  `test_ego_route_always_contains_a_turn`. Fixed `ego_od` missions are
+  exempt — their route is whatever BFS finds between A and B.
+- **Signals are walls for turning traffic.** Two-phase signals permit only
+  straight movements, so on sparse/irregular maps a signal can make whole
+  exits unreachable (a suburbs mission was unroutable this way). Maps with
+  skipped edges should pass `with_signals=False` (all-way stops turn
+  everywhere), and any new map belongs in
+  `test_every_scenario_builds_a_valid_graph` + a mission-completion test.
+- **A mission ego teleports home.** With `ego_od` set, arrival respawns the
+  ego at the origin; `_transitions` despawns any vehicle within 12 m of the
+  spawn point so the teleport can't materialize inside traffic (the
+  oriented-box audit would flag it).
+- **New ego routes must be clear at the post-skip path.** The city ego starts
+  a replacement trip on `paths[2]`, not the incoming boundary stub at
+  `paths[0]`. `_random_route(require_clear=True, skip=2)` therefore checks
+  clearance at the actual spawn path; checking only `paths[0]` can place the
+  ego on top of newly spawned traffic.
 - **RoadGraph geometry is load-bearing.** Lanes at controlled nodes end *at
   their stop line* (the control applies at `u = lane.length`), and connector
   polylines must start/end exactly at the endpoints of the lanes they join —
@@ -261,7 +306,8 @@ These encode real bugs that were already found and fixed — do not reintroduce:
   qualify too"), never narration of the next line.
 - New tunables go next to their peers: legacy world constants at the top of
   `sim/arterial.py`, city geometry/routing constants at the top of
-  `sim/city/graph.py`, IDM params in the `IDM` dict in `sim/traffic.py`, and
+  `sim/city/graph.py`, IDM params in the `IDM` / `DRIVER_PROFILES` dicts in
+  `sim/traffic.py`, and
   colors in `render/live.py` / `render/stills.py`.
 - Keep `render/stills.py` (matplotlib, feeds cli/demo.py) and
   `render/live.py` (pygame live) separate — they serve different artifacts;
@@ -275,8 +321,8 @@ These encode real bugs that were already found and fixed — do not reintroduce:
 |---|---|
 | City `sim.step(dt)` | well below 0.1 ms in normal traffic |
 | City LiDAR local scene | commonly ~80 segments; varies with blocks/traffic |
-| City `step` + world + LiDAR rendering | ~2.3 ms headless after warm-up (16 ms frame budget) |
-| 24 s GIF export (480 frames, 1080 px) | ~20 s, ~12 MB |
+| Scenario `step` + world + LiDAR rendering | ~4.2–4.7 ms headless after warm-up (16 ms frame budget); polygon-strip roads cost ~2 ms over the old axis-aligned rects |
+| 24 s GIF export (480 frames, 1080 px) | ~20 s, ~10 MB |
 
 Headless training loops (future RL/detector work) should call `sim.step` +
 `Lidar2D.scan` directly and skip rendering entirely — that path sustains

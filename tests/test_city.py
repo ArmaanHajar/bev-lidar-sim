@@ -15,6 +15,23 @@ from bev_lidar_sim import Lidar2D
 
 
 class CitySimulatorTest(unittest.TestCase):
+    def test_driving_modes_change_ego_pace_and_can_switch_live(self):
+        speeds = []
+        for mode in ("safe", "normal", "daring"):
+            sim = CitySimulator(seed=1, driving_mode=mode)
+            sim.vehicles = [sim.ego]
+            for _ in range(40):
+                sim.step(0.05)
+            speeds.append(sim.ego.v)
+
+        self.assertLess(speeds[0], speeds[1])
+        self.assertLess(speeds[1], speeds[2])
+
+        sim.set_driving_mode("daring")
+        self.assertEqual(sim.driving_mode, "daring")
+        with self.assertRaises(ValueError):
+            sim.set_driving_mode("reckless")
+
     def test_city_has_connected_routes_and_varied_geometry(self):
         sim = CitySimulator(seed=1)
 

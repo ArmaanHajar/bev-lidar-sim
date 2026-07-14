@@ -20,4 +20,5 @@ bev-drive = "bev_lidar_sim.cli.drive:main"
 bev-demo = "bev_lidar_sim.cli.demo:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["bev_lidar_sim*"]
